@@ -1,30 +1,32 @@
 import logging
-from aiogram import Bot, Dispatcher, executor, types
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram import Bot, Dispatcher, Router, F
+from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.filters import Command
 from datetime import datetime, timedelta
+import asyncio
 
 API_TOKEN = "8575675658:AAHzXNMkt1cmRjGrMkz6zwcxHWvcr95Mp94"
 
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher(bot)
+dp = Dispatcher()
+router = Router()
 
 # ===== Клавіатури =====
-keyboard = InlineKeyboardMarkup(row_width=1)
-keyboard.add(
-    InlineKeyboardButton("📦 Перевести байти в МБ та ГБ", callback_data="bytes"),
-    InlineKeyboardButton("💳 Тарифна підписка", callback_data="tariff"),
-    InlineKeyboardButton("🔻 Розрахувати знижку", callback_data="discount")
-)
+keyboard = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="📦 Перевести байти в МБ та ГБ", callback_data="bytes")],
+    [InlineKeyboardButton(text="💳 Тарифна підписка", callback_data="tariff")],
+    [InlineKeyboardButton(text="🔻 Розрахувати знижку", callback_data="discount")]
+])
 
-# Кнопка головного меню
-main_menu_kb = InlineKeyboardMarkup(row_width=1)
-main_menu_kb.add(InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu"))
+main_menu_kb = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="🏠 Головне меню", callback_data="main_menu")]
+])
 
-# Кнопка назад
-back_kb = InlineKeyboardMarkup(row_width=1)
-back_kb.add(InlineKeyboardButton("🔙 Назад", callback_data="back"))
+back_kb = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="🔙 Назад", callback_data="back")]
+])
 
 # ===== Состояния =====
 waiting_for_bytes = set()
@@ -36,16 +38,16 @@ waiting_for_tariff_packages = set()
 tariff_data = {}
 
 # ===== /start =====
-@dp.message_handler(commands=["start"])
-async def start(message: types.Message):
+@router.message(Command("start"))
+async def start(message: Message):
     await message.answer(
         "Привіт! Чим можу допомогти?",
         reply_markup=keyboard
     )
 
 # ===== Байти =====
-@dp.callback_query_handler(lambda c: c.data == "bytes")
-async def bytes_callback(call: types.CallbackQuery):
+@router.callback_query(F.data == "bytes")
+async def bytes_callback(call: CallbackQuery):
     waiting_for_bytes.add(call.from_user.id)
     await call.message.answer(
         "Введіть кількість байтів:",
@@ -54,8 +56,8 @@ async def bytes_callback(call: types.CallbackQuery):
     await call.answer()
 
 # ===== Скидка =====
-@dp.callback_query_handler(lambda c: c.data == "discount")
-async def discount_callback(call: types.CallbackQuery):
+@router.callback_query(F.data == "discount")
+async def discount_callback(call: CallbackQuery):
     waiting_for_price.add(call.from_user.id)
     await call.message.answer(
         "Введіть ціну у грн:",
@@ -64,8 +66,8 @@ async def discount_callback(call: types.CallbackQuery):
     await call.answer()
 
 # ===== Тарифная подписка =====
-@dp.callback_query_handler(lambda c: c.data == "tariff")
-async def tariff_callback(call: types.CallbackQuery):
+@router.callback_query(F.data == "tariff")
+async def tariff_callback(call: CallbackQuery):
     waiting_for_tariff_date.add(call.from_user.id)
     await call.message.answer(
         "Введіть сьогоднішню дату у форматі ДД.ММ.РРРР\nНаприклад: 29.01.2026",
@@ -73,12 +75,11 @@ async def tariff_callback(call: types.CallbackQuery):
     )
     await call.answer()
 
-# ===== Головне меню (сброс памяти) =====
-@dp.callback_query_handler(lambda c: c.data == "main_menu")
-async def go_main_menu(call: types.CallbackQuery):
+# ===== Головне меню =====
+@router.callback_query(F.data == "main_menu")
+async def go_main_menu(call: CallbackQuery):
     user_id = call.from_user.id
 
-    # Очищаем все состояния и данные пользователя
     waiting_for_bytes.discard(user_id)
     waiting_for_price.discard(user_id)
     waiting_for_discount.pop(user_id, None)
@@ -94,11 +95,10 @@ async def go_main_menu(call: types.CallbackQuery):
     await call.answer()
 
 # ===== Кнопка "Назад" =====
-@dp.callback_query_handler(lambda c: c.data == "back")
-async def go_back(call: types.CallbackQuery):
+@router.callback_query(F.data == "back")
+async def go_back(call: CallbackQuery):
     user_id = call.from_user.id
 
-    # Тарифная подписка
     if user_id in waiting_for_tariff_end_date:
         waiting_for_tariff_end_date.remove(user_id)
         waiting_for_tariff_date.add(user_id)
@@ -113,8 +113,6 @@ async def go_back(call: types.CallbackQuery):
             "🔙 Повернулися на попередній крок.\nВведіть дату, до якої оплачено поточний пакет (ДД.ММ.РРРР):",
             reply_markup=back_kb
         )
-
-    # Скидка
     elif user_id in waiting_for_discount:
         waiting_for_discount.pop(user_id)
         waiting_for_price.add(user_id)
@@ -126,8 +124,8 @@ async def go_back(call: types.CallbackQuery):
     await call.answer()
 
 # ===== Обработка ввода =====
-@dp.message_handler()
-async def handle_input(message: types.Message):
+@router.message()
+async def handle_input(message: Message):
     user_id = message.from_user.id
     text = message.text.strip().replace(",", ".")
 
@@ -278,5 +276,9 @@ async def handle_input(message: types.Message):
         )
 
 # ===== Запуск =====
+async def main():
+    dp.include_router(router)
+    await dp.start_polling(bot)
+
 if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True)
+    asyncio.run(main())
