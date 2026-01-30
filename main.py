@@ -1,6 +1,6 @@
 import logging
 from aiogram import Bot, Dispatcher, Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import Command
 from datetime import datetime, timedelta
 import asyncio
@@ -20,9 +20,11 @@ keyboard = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="🔻 Розрахувати знижку", callback_data="discount")]
 ])
 
-main_menu_kb = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="🏠 Головне меню", callback_data="main_menu")]
-])
+# Обычная клавиатура внизу экрана
+main_menu_reply_kb = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text="🏠 Головне меню")]],
+    resize_keyboard=True
+)
 
 back_kb = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="🔙 Назад", callback_data="back")]
@@ -32,10 +34,19 @@ back_kb = InlineKeyboardMarkup(inline_keyboard=[
 waiting_for_bytes = set()
 waiting_for_price = set()
 waiting_for_discount = {}
-waiting_for_tariff_date = set()
 waiting_for_tariff_end_date = set()
 waiting_for_tariff_packages = set()
 tariff_data = {}
+
+# ===== Функция сброса всех состояний =====
+def clear_user_states(user_id):
+    """Очищает все состояния пользователя"""
+    waiting_for_bytes.discard(user_id)
+    waiting_for_price.discard(user_id)
+    waiting_for_discount.pop(user_id, None)
+    waiting_for_tariff_end_date.discard(user_id)
+    waiting_for_tariff_packages.discard(user_id)
+    tariff_data.pop(user_id, None)
 
 # ===== /start =====
 @router.message(Command("start"))
@@ -45,80 +56,107 @@ async def start(message: Message):
         reply_markup=keyboard
     )
 
+# ===== /updates =====
+@router.message(Command("updates"))
+async def updates(message: Message):
+    updates_text = """
+🔄 <b>Оновлення бота</b>
+
+<b>Версія 2.0</b> (30.01.2026)
+• Кнопка "Головне меню" тепер знаходиться внизу екрана
+• Виправлено баг зі скиданням пам'яті при переході між функціями
+• Додано команду /updates для перегляду оновлень
+
+<b>Версія 1.0</b>
+• Конвертація байтів у МБ та ГБ
+• Розрахунок тарифної підписки
+• Калькулятор знижок
+"""
+    await message.answer(updates_text, parse_mode="HTML", reply_markup=main_menu_reply_kb)
+
+
 # ===== Байти =====
 @router.callback_query(F.data == "bytes")
 async def bytes_callback(call: CallbackQuery):
-    waiting_for_bytes.add(call.from_user.id)
+    user_id = call.from_user.id
+    
+    # Сброс всех состояний
+    clear_user_states(user_id)
+    
+    waiting_for_bytes.add(user_id)
     await call.message.answer(
         "Введіть кількість байтів:",
-        reply_markup=main_menu_kb
+        reply_markup=main_menu_reply_kb
     )
     await call.answer()
 
 # ===== Скидка =====
 @router.callback_query(F.data == "discount")
 async def discount_callback(call: CallbackQuery):
-    waiting_for_price.add(call.from_user.id)
+    user_id = call.from_user.id
+    
+    # Сброс всех состояний
+    clear_user_states(user_id)
+    
+    waiting_for_price.add(user_id)
     await call.message.answer(
         "Введіть ціну у грн:",
-        reply_markup=main_menu_kb
+        reply_markup=main_menu_reply_kb
     )
     await call.answer()
 
 # ===== Тарифная подписка =====
 @router.callback_query(F.data == "tariff")
 async def tariff_callback(call: CallbackQuery):
-    waiting_for_tariff_date.add(call.from_user.id)
+    user_id = call.from_user.id
+    
+    # Сброс всех состояний
+    clear_user_states(user_id)
+    
+    waiting_for_tariff_end_date.add(user_id)
     await call.message.answer(
-        "Введіть сьогоднішню дату у форматі ДД.ММ.РРРР\nНаприклад: 29.01.2026",
-        reply_markup=main_menu_kb
+        "Введіть дату, до якої оплачено поточний пакет (ДД.ММ.РРРР)\nНаприклад: 30.01.2026",
+        reply_markup=back_kb
     )
     await call.answer()
 
 # ===== Головне меню =====
-@router.callback_query(F.data == "main_menu")
-async def go_main_menu(call: CallbackQuery):
-    user_id = call.from_user.id
+@router.message(F.text == "🏠 Головне меню")
+async def go_main_menu(message: Message):
+    user_id = message.from_user.id
+    
+    clear_user_states(user_id)
 
-    waiting_for_bytes.discard(user_id)
-    waiting_for_price.discard(user_id)
-    waiting_for_discount.pop(user_id, None)
-    waiting_for_tariff_date.discard(user_id)
-    waiting_for_tariff_end_date.discard(user_id)
-    waiting_for_tariff_packages.discard(user_id)
-    tariff_data.pop(user_id, None)
-
-    await call.message.answer(
+    await message.answer(
         "🏠 Повернулися в головне меню. Чим можу допомогти?",
         reply_markup=keyboard
     )
-    await call.answer()
 
 # ===== Кнопка "Назад" =====
 @router.callback_query(F.data == "back")
 async def go_back(call: CallbackQuery):
     user_id = call.from_user.id
 
-    if user_id in waiting_for_tariff_end_date:
-        waiting_for_tariff_end_date.remove(user_id)
-        waiting_for_tariff_date.add(user_id)
-        await call.message.answer(
-            "🔙 Повернулися на попередній крок.\nВведіть сьогоднішню дату у форматі ДД.ММ.РРРР\nНаприклад: 29.01.2026",
-            reply_markup=main_menu_kb
-        )
-    elif user_id in waiting_for_tariff_packages:
+    if user_id in waiting_for_tariff_packages:
         waiting_for_tariff_packages.remove(user_id)
         waiting_for_tariff_end_date.add(user_id)
         await call.message.answer(
             "🔙 Повернулися на попередній крок.\nВведіть дату, до якої оплачено поточний пакет (ДД.ММ.РРРР):",
             reply_markup=back_kb
         )
+    elif user_id in waiting_for_tariff_end_date:
+        # Возвращаемся в главное меню, так как первый шаг теперь автоматический
+        clear_user_states(user_id)
+        await call.message.answer(
+            "🏠 Повернулися в головне меню. Чим можу допомогти?",
+            reply_markup=keyboard
+        )
     elif user_id in waiting_for_discount:
         waiting_for_discount.pop(user_id)
         waiting_for_price.add(user_id)
         await call.message.answer(
             "🔙 Повернулися на попередній крок.\nВведіть ціну у грн:",
-            reply_markup=main_menu_kb
+            reply_markup=main_menu_reply_kb
         )
 
     await call.answer()
@@ -129,49 +167,18 @@ async def handle_input(message: Message):
     user_id = message.from_user.id
     text = message.text.strip().replace(",", ".")
 
-    # ===== Тариф: сегодняшняя дата =====
-    if user_id in waiting_for_tariff_date:
-        try:
-            date_obj = datetime.strptime(text, "%d.%m.%Y")
-        except ValueError:
-            await message.answer(
-                "❌ Дата введена некорректно.\nВведіть дату у форматі ДД.ММ.РРРР\nНаприклад: 29.01.2026",
-                reply_markup=main_menu_kb
-            )
-            return
-
-        waiting_for_tariff_date.remove(user_id)
-        tariff_data[user_id] = {"date": date_obj}
-
-        await message.answer(
-            f"✅ Сьогоднішня дата прийнята: {date_obj.strftime('%d.%m.%Y')}\n"
-            f"Введіть дату, до якої оплачено поточний пакет (ДД.ММ.РРРР):",
-            reply_markup=back_kb
-        )
-        waiting_for_tariff_end_date.add(user_id)
-        return
-
     # ===== Тариф: дата окончания пакета =====
     if user_id in waiting_for_tariff_end_date:
         try:
             end_date = datetime.strptime(text, "%d.%m.%Y")
         except ValueError:
             await message.answer(
-                "❌ Дата введена некорректно.\nВведіть дату у форматі ДД.ММ.РРРР",
+                "❌ Дата введена некорректно.\nВведіть дату у форматі ДД.ММ.РРРР\nНаприклад: 30.01.2026",
                 reply_markup=back_kb
             )
             return
 
-        start_date = tariff_data[user_id]["date"]
-        if end_date < start_date:
-            await message.answer(
-                f"❌ Дата закінчення пакета не може бути раніше {start_date.strftime('%d.%m.%Y')}.\n"
-                "Введіть коректну дату закінчення пакета.",
-                reply_markup=back_kb
-            )
-            return
-
-        tariff_data[user_id]["end_date"] = end_date
+        tariff_data[user_id] = {"end_date": end_date}
         waiting_for_tariff_end_date.remove(user_id)
 
         await message.answer(
@@ -195,16 +202,17 @@ async def handle_input(message: Message):
         tariff_data[user_id]["packages"] = packages
         waiting_for_tariff_packages.remove(user_id)
 
-        last_end_date = tariff_data[user_id]["end_date"]
+        end_date = tariff_data[user_id]["end_date"]
         total_days = packages * 28
-        final_end_date = last_end_date + timedelta(days=total_days)
+        final_end_date = end_date + timedelta(days=total_days)
 
         await message.answer(
             f"✅ Кількість запасних пакетів: {packages}\n"
-            f"Поточний пакет дійсний: {tariff_data[user_id]['date'].strftime('%d.%m.%Y')} — {last_end_date.strftime('%d.%m.%Y')}\n"
+            f"Поточний пакет дійсний до: {end_date.strftime('%d.%m.%Y')}\n"
             f"Якщо використати всі запасні пакети, дата закінчення стане: {final_end_date.strftime('%d.%m.%Y')}",
-            reply_markup=main_menu_kb
+            reply_markup=main_menu_reply_kb
         )
+        tariff_data.pop(user_id, None)
         return
 
     # ===== Байты =====
@@ -212,7 +220,7 @@ async def handle_input(message: Message):
         if not text.isdigit():
             await message.answer(
                 "❌ Байти введені некоректно. Введіть ціле число.",
-                reply_markup=main_menu_kb
+                reply_markup=main_menu_reply_kb
             )
             return
 
@@ -222,7 +230,7 @@ async def handle_input(message: Message):
 
         await message.answer(
             f"✅ Результат:\n📦 Байти: {bytes_value}\n📊 МБ: {mb:.2f}\n💾 ГБ: {gb:.2f}",
-            reply_markup=main_menu_kb
+            reply_markup=main_menu_reply_kb
         )
 
         waiting_for_bytes.remove(user_id)
@@ -237,7 +245,7 @@ async def handle_input(message: Message):
         except ValueError:
             await message.answer(
                 "❌ Ціна введена некоректно. Введіть суму у грн.",
-                reply_markup=main_menu_kb
+                reply_markup=main_menu_reply_kb
             )
             return
 
@@ -272,7 +280,7 @@ async def handle_input(message: Message):
             f"Знижка: {percent:.2f}%\n"
             f"Економія: {discount_sum:.2f} грн\n"
             f"До оплати: {final_price:.2f} грн",
-            reply_markup=main_menu_kb
+            reply_markup=main_menu_reply_kb
         )
 
 # ===== Запуск =====
