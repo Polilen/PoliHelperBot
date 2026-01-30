@@ -86,7 +86,7 @@ async def bytes_callback(call: CallbackQuery):
     waiting_for_bytes.add(user_id)
     await call.message.answer(
         "Введіть кількість байтів:",
-        reply_markup=main_menu_reply_kb
+        reply_markup=back_kb
     )
     await call.answer()
 
@@ -101,7 +101,7 @@ async def discount_callback(call: CallbackQuery):
     waiting_for_price.add(user_id)
     await call.message.answer(
         "Введіть ціну у грн:",
-        reply_markup=main_menu_reply_kb
+        reply_markup=back_kb
     )
     await call.answer()
 
@@ -141,11 +141,11 @@ async def go_back(call: CallbackQuery):
         waiting_for_tariff_packages.remove(user_id)
         waiting_for_tariff_end_date.add(user_id)
         await call.message.answer(
-            "🔙 Повернулися на попередній крок.\nВведіть дату, до якої оплачено поточний пакет (ДД.ММ.РРРР):",
+            "🔙 Повернулися на попередній крок.\nВведіть дату, до якої оплачено поточний пакет (ДД.ММ.РРРР):\nНаприклад: 30.01.2026",
             reply_markup=back_kb
         )
     elif user_id in waiting_for_tariff_end_date:
-        # Возвращаемся в главное меню, так как первый шаг теперь автоматический
+        # Возвращаемся в главное меню
         clear_user_states(user_id)
         await call.message.answer(
             "🏠 Повернулися в головне меню. Чим можу допомогти?",
@@ -156,7 +156,21 @@ async def go_back(call: CallbackQuery):
         waiting_for_price.add(user_id)
         await call.message.answer(
             "🔙 Повернулися на попередній крок.\nВведіть ціну у грн:",
-            reply_markup=main_menu_reply_kb
+            reply_markup=back_kb
+        )
+    elif user_id in waiting_for_price:
+        # Возвращаемся в главное меню
+        clear_user_states(user_id)
+        await call.message.answer(
+            "🏠 Повернулися в головне меню. Чим можу допомогти?",
+            reply_markup=keyboard
+        )
+    elif user_id in waiting_for_bytes:
+        # Возвращаемся в главное меню
+        clear_user_states(user_id)
+        await call.message.answer(
+            "🏠 Повернулися в головне меню. Чим можу допомогти?",
+            reply_markup=keyboard
         )
 
     await call.answer()
